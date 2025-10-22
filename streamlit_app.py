@@ -1,5 +1,5 @@
 
-import io
+iimport io
 import os
 import json
 import sqlite3
@@ -226,6 +226,26 @@ page = st.sidebar.radio(
         "👤 Članovi",
     ],
 )
+
+# --- Sidebar dijagnostika ---
+with st.sidebar.expander("⚙️ Dijagnostika"):
+    st.write("Radni direktorij:", os.getcwd())
+    st.write("DB putanja:", os.path.abspath(DB_PATH))
+    data_dir = os.path.dirname(DB_PATH) or "."
+    st.write("Data direktorij:", os.path.abspath(data_dir))
+    try:
+        ensure_dirs()
+        ok_write = os.access(data_dir, os.W_OK)
+        st.write("Write permission:", ok_write)
+        conn = get_conn()
+        tabs = pd.read_sql("SELECT name FROM sqlite_master WHERE type='table'", conn)
+        conn.close()
+        st.write("Tablice u bazi:", ", ".join(tabs["name"].tolist()) if not tabs.empty else "(nema)")
+        if st.button("💾 Inicijaliziraj/kreiraj bazu"):
+            init_db()
+            st.success("Baza inicijalizirana.")
+    except Exception as e:
+        st.error(f"Greška s bazom: {e}")
 
 # ---------- helpers za UI ----------
 def select_or_new(label: str, options: List[str], key: str) -> str:
