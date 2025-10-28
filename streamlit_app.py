@@ -251,7 +251,7 @@ if choice:
                     st.warning("Označi 'Potvrdi brisanje' prije brisanja.")
         with cdup:
             if st.button("Dupliciraj u novi zapis", key=f"btn_duplicate_{edit_id}"):
-                conn.execute(\"\"\"\
+                conn.execute("""
                     INSERT INTO competitions
                     (kind, custom_kind, name, date_from, date_to, place, style, age_group, country, country_code,
                      team_rank, club_competitors, total_competitors, total_clubs, total_countries,
