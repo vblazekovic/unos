@@ -1,4 +1,4 @@
 streamlit
 pandas
 pycountry==24.6.1
-matplotlib
+xlsxwriter

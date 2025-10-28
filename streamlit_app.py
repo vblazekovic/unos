@@ -3,17 +3,38 @@ import sqlite3
 import pandas as pd
 from datetime import date, datetime
 
-# --------------- DB ---------------
+st.set_page_config(page_title="HK Podravka – Klub app", layout="wide")
+
+# ---------------- DB ----------------
 def get_conn():
     conn = sqlite3.connect("club.db", check_same_thread=False)
+    # Coaches
     conn.execute("""CREATE TABLE IF NOT EXISTS coaches (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        full_name TEXT
+        full_name TEXT UNIQUE
     )""")
+    # Members
     conn.execute("""CREATE TABLE IF NOT EXISTS members (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        full_name TEXT
+        full_name TEXT,
+        dob TEXT,
+        is_veteran INTEGER DEFAULT 0
     )""")
+    # Attendance
+    conn.execute("""CREATE TABLE IF NOT EXISTS attendance (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        member_id INTEGER,
+        session_date TEXT,
+        session_name TEXT
+    )""")
+    # Club info
+    conn.execute("""CREATE TABLE IF NOT EXISTS club_info (
+        id INTEGER PRIMARY KEY CHECK (id=1),
+        name TEXT,
+        address TEXT,
+        contact TEXT
+    )""")
+    # Competitions
     conn.execute("""CREATE TABLE IF NOT EXISTS competitions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         kind TEXT,
@@ -39,14 +60,17 @@ def get_conn():
         bulletin_file TEXT,
         results_file TEXT
     )""")
+    # Competition results
     conn.execute("""CREATE TABLE IF NOT EXISTS competition_results (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         competition_id INTEGER,
         member_id INTEGER,
         weight_category TEXT,
         style TEXT,
+        placing TEXT,
         result_text TEXT
     )""")
+    # Competition photos meta
     conn.execute("""CREATE TABLE IF NOT EXISTS competition_photos (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         competition_id INTEGER,
@@ -56,15 +80,18 @@ def get_conn():
     )""")
     return conn
 
+conn = get_conn()
+
+# ---------------- Utils ----------------
 def iso3(country_name: str) -> str:
     try:
         import pycountry
         c = pycountry.countries.get(name=country_name)
-        if c: return c.alpha_3
-        # fuzzy
+        if c:
+            return c.alpha_3
         from difflib import get_close_matches
         names = [x.name for x in pycountry.countries]
-        m = get_close_matches(country_name, names, n=1, cutoff=0.7)
+        m = get_close_matches(country_name or "", names, n=1, cutoff=0.7)
         if m:
             c = pycountry.countries.get(name=m[0])
             return c.alpha_3 if c else ""
@@ -79,6 +106,13 @@ def all_countries_list():
     except Exception:
         return []
 
+def fmt_date(s):
+    if not s: return ""
+    try:
+        return pd.to_datetime(s).strftime("%d.%m.%Y.")
+    except Exception:
+        return s
+
 KINDS = [
     "PRVENSTVO HRVATSKE","MEĐUNARODNI TURNIR","REPREZENTATIVNI NASTUP",
     "HRVAČKA LIGA ZA SENIORE","MEĐUNARODNA HRVAČKA LIGA ZA KADETE",
@@ -88,465 +122,400 @@ REP_SUB = ["PRVENSTVO EUROPE","PRVENSTVO SVIJETA","PRVENSTVO BALKANA","UWW TURNI
 STYLES = ["GR","FS","WW","BW","MODIFICIRANO"]
 AGES = ["POČETNICI","U11","U13","U15","U17","U20","U23","SENIORI"]
 
-st.set_page_config(page_title="Natjecanja", layout="wide")
-st.title("Aplikacija kluba")
+# ---------------- Layout ----------------
+st.title("HK Podravka — Klupska aplikacija")
 
-# ==========================
-# Natjecanja i rezultati (nova verzija)
-# ==========================
+menu = st.sidebar.radio("Sekcije", [
+    "Klub", "Članstvo", "Prisustvo", "Treneri", "Veterani", "Natjecanja i rezultati", "Izvješća"
+])
 
-st.header("Natjecanja i rezultati")
+# ---------------- Klub ----------------
+if menu == "Klub":
+    st.header("Osnovni podaci o klubu")
+    row = conn.execute("SELECT name, address, contact FROM club_info WHERE id=1").fetchone()
+    name, address, contact = (row if row else ("", "", ""))
+    with st.form("club_form"):
+        name = st.text_input("Naziv kluba", value=name or "")
+        address = st.text_input("Adresa", value=address or "")
+        contact = st.text_input("Kontakt", value=contact or "")
+        sub = st.form_submit_button("Spremi")
+    if sub:
+        conn.execute("INSERT OR REPLACE INTO club_info (id, name, address, contact) VALUES (1,?,?,?)",
+                     (name, address, contact))
+        conn.commit()
+        st.success("Podaci kluba spremljeni.")
 
-# ----- Unos natjecanja -----
-with st.form("comp_form"):
-    kind = st.selectbox("Vrsta natjecanja", KINDS)
-    rep_sub = st.selectbox("Podvrsta reprezentativnog nastupa", REP_SUB, disabled=(kind!="REPREZENTATIVNI NASTUP"))
-    custom_kind = st.text_input("Upiši vrstu (ako 'OSTALO')", disabled=(kind!="OSTALO"))
-    name = st.text_input("Ime natjecanja (ako postoji naziv)")
-    c1, c2 = st.columns(2)
-    date_from = c1.date_input("Datum od", value=date.today())
-    date_to = c2.date_input("Datum do (ako 1 dan, ostavi isti)", value=date.today())
-    place = st.text_input("Mjesto")
+# ---------------- Članstvo ----------------
+elif menu == "Članstvo":
+    st.header("Članovi")
+    with st.form("member_form"):
+        full_name = st.text_input("Ime i prezime")
+        dob = st.date_input("Datum rođenja", value=date(2010,1,1))
+        is_veteran = st.checkbox("Veteran")
+        add_m = st.form_submit_button("Dodaj člana")
+    if add_m and full_name.strip():
+        conn.execute("INSERT INTO members (full_name, dob, is_veteran) VALUES (?,?,?)",
+                     (full_name.strip(), str(dob), 1 if is_veteran else 0))
+        conn.commit()
+        st.success("Član dodan.")
 
-    countries = all_countries_list()
-    c_country, c_iso = st.columns([3,1])
-    with c_country:
-        country = st.selectbox("Država (odaberi)", [""] + countries, index=0)
-    with c_iso:
-        auto_iso = iso3(country) if country else ""
-        st.text_input("ISO3 kratica", value=auto_iso, disabled=True)
+    mdf = pd.read_sql_query("SELECT id, full_name AS ime, dob, CASE WHEN is_veteran=1 THEN 'DA' ELSE 'NE' END AS veteran FROM members ORDER BY full_name", conn)
+    if not mdf.empty:
+        mdf["dob"] = mdf["dob"].apply(fmt_date)
+    st.dataframe(mdf, use_container_width=True)
 
-    style = st.selectbox("Hrvački stil", STYLES)
-    age_group = st.selectbox("Uzrast", AGES)
+# ---------------- Prisustvo ----------------
+elif menu == "Prisustvo":
+    st.header("Prisustvo na treninzima")
+    members = pd.read_sql_query("SELECT id, full_name FROM members ORDER BY full_name", conn)
+    if members.empty:
+        st.info("Nema članova. Dodaj članove u sekciji Članstvo.")
+    else:
+        mid = st.selectbox("Član", members["full_name"].tolist())
+        sel_id = int(members.loc[members["full_name"]==mid, "id"].values[0])
+        d = st.date_input("Datum", value=date.today())
+        sess = st.text_input("Trening (npr. Jutarnji, Popodnevni)")
+        if st.button("Evidentiraj prisustvo"):
+            conn.execute("INSERT INTO attendance (member_id, session_date, session_name) VALUES (?,?,?)",
+                         (sel_id, str(d), sess))
+            conn.commit()
+            st.success("Prisustvo evidentirano.")
 
-    c3, c4, c5 = st.columns(3)
-    team_rank = c3.text_input("Ekipni poredak (npr. 1., 5., 10.)")
-    club_competitors = c4.number_input("Broj naših natjecatelja", min_value=0, step=1, value=0)
-    total_competitors = c5.number_input("Ukupan broj natjecatelja", min_value=0, step=1, value=0)
-    c6, c7 = st.columns(2)
-    total_clubs = c6.number_input("Broj klubova", min_value=0, step=1, value=0)
-    total_countries = c7.number_input("Broj zemalja", min_value=0, step=1, value=0)
+    adf = pd.read_sql_query("""
+        SELECT a.id, m.full_name AS član, a.session_date AS datum, a.session_name AS trening
+        FROM attendance a JOIN members m ON a.member_id=m.id
+        ORDER BY a.session_date DESC, m.full_name
+    """, conn)
+    if not adf.empty:
+        adf["datum"] = adf["datum"].apply(fmt_date)
+    st.dataframe(adf, use_container_width=True)
 
-    # Treneri: iz baze + dodatni
-    coach_rows = conn.execute("SELECT full_name FROM coaches ORDER BY full_name").fetchall()
-    coach_choices = [r[0] for r in coach_rows] if coach_rows else []
-    c_coach_sel, c_coach_custom = st.columns([2,1])
-    with c_coach_sel:
-        coach_mult = st.multiselect("Trener(i) (iz baze)", coach_choices)
-    with c_coach_custom:
-        coach_custom = st.text_input("Dodatni trener (ime i prezime)")
-    coach_all = coach_mult + ([coach_custom] if coach_custom else [])
-    coach_text = ", ".join([c for c in coach_all if c])
+# ---------------- Treneri ----------------
+elif menu == "Treneri":
+    st.header("Treneri")
+    with st.form("coach_form"):
+        coach_name = st.text_input("Ime i prezime trenera")
+        add_c = st.form_submit_button("Dodaj trenera")
+    if add_c and coach_name.strip():
+        try:
+            conn.execute("INSERT INTO coaches (full_name) VALUES (?)", (coach_name.strip(),))
+            conn.commit()
+            st.success("Trener dodan.")
+        except sqlite3.IntegrityError:
+            st.info("Trener već postoji.")
+    cdf = pd.read_sql_query("SELECT id, full_name AS trener FROM coaches ORDER BY full_name", conn)
+    st.dataframe(cdf, use_container_width=True)
 
-    notes = st.text_area("Zapažanje trenera (za objave)")
-    bulletin_link = st.text_input("Link na bilten/rezultate")
-    results_link = st.text_input("Link na službene rezultate")
-    gallery_link = st.text_input("Link na objavu na webu (galerija)")
+# ---------------- Veterani ----------------
+elif menu == "Veterani":
+    st.header("Veterani")
+    vdf = pd.read_sql_query("SELECT full_name AS ime, dob FROM members WHERE is_veteran=1 ORDER BY full_name", conn)
+    if not vdf.empty:
+        vdf["dob"] = vdf["dob"].apply(fmt_date)
+    st.dataframe(vdf, use_container_width=True)
 
-    submit = st.form_submit_button("Spremi natjecanje")
+# ---------------- Natjecanja i rezultati ----------------
+elif menu == "Natjecanja i rezultati":
+    st.header("Natjecanja i rezultati")
 
-if submit:
-    conn.execute("""INSERT INTO competitions
-        (kind,custom_kind,name,date_from,date_to,place,style,age_group,country,country_code,
-         team_rank,club_competitors,total_competitors,total_clubs,total_countries,
-         coaches_text,notes,bulletin_link,results_link,gallery_link, bulletin_file, results_file)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (kind, rep_sub if kind=="REPREZENTATIVNI NASTUP" else custom_kind, name,
-         str(date_from), str(date_to), f"{place}, {country}", style, age_group, country, auto_iso,
-         team_rank, int(club_competitors), int(total_competitors), int(total_clubs), int(total_countries),
-         coach_text, notes, bulletin_link, results_link, gallery_link, "", ""))
-    conn.commit()
-    st.success("Natjecanje spremljeno.")
+    # ----- Unos natjecanja -----
+    with st.form("comp_form"):
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            kind = st.selectbox("Vrsta natjecanja", KINDS, key="kind_add")
+        with col2:
+            # Rep. podvrsta je vidljiva/aktivna samo kada je odabran reprezentativni nastup
+            rep_sub = st.selectbox("Podvrsta (REP)", REP_SUB, disabled=(kind!="REPREZENTATIVNI NASTUP"), key="rep_add")
+        with col3:
+            custom_kind = st.text_input("Upiši vrstu (ako 'OSTALO')", disabled=(kind!="OSTALO"))
 
-st.markdown("---")
-
-# ----- Uredi / briši / dupliciraj -----
-st.subheader("Uredi / briši / dupliciraj natjecanje")
-comp_rows = conn.execute("SELECT id, name, date_from, kind FROM competitions ORDER BY date_from DESC LIMIT 200").fetchall()
-comp_options = [""] + [f"{r[0]} – {r[2]} – {r[1]} ({r[3]})" for r in comp_rows]
-choice = st.selectbox("Odaberi natjecanje", comp_options, key="edit_select_comp")
-
-if choice:
-    edit_id = int(choice.split(" – ")[0])
-    row = conn.execute("""SELECT id, kind, custom_kind, name, date_from, date_to, place, style, age_group,
-                                 country, country_code, team_rank, club_competitors, total_competitors,
-                                 total_clubs, total_countries, coaches_text, notes, bulletin_link, results_link, gallery_link
-                          FROM competitions WHERE id=?""", (edit_id,)).fetchone()
-    (cid, kind_e, custom_kind_e, name_e, df_e, dt_e, place_e, style_e, age_e,
-     country_e, iso_e, team_rank_e, club_comp_e, total_comp_e, clubs_e, countries_e,
-     coaches_e, notes_e, bull_e, res_e, gal_e) = row
-    place_city = (place_e or "").split(",")[0].strip()
-
-    with st.form("edit_comp_form"):
-        kind = st.selectbox("Vrsta natjecanja", KINDS, index=KINDS.index(kind_e) if kind_e in KINDS else 0)
-        rep_sub = st.selectbox("Podvrsta reprezentativnog nastupa", REP_SUB, disabled=(kind!="REPREZENTATIVNI NASTUP"))
-        custom_kind = st.text_input("Upiši vrstu (ako 'OSTALO')", value=custom_kind_e or "", disabled=(kind!="OSTALO"))
-        name = st.text_input("Ime natjecanja (ako postoji naziv)", value=name_e or "")
+        name = st.text_input("Ime natjecanja")
         c1, c2 = st.columns(2)
-        date_from = c1.date_input("Datum od", value=pd.to_datetime(df_e).date() if df_e else date.today())
-        date_to = c2.date_input("Datum do (ako 1 dan, ostavi isti)", value=pd.to_datetime(dt_e).date() if dt_e else date.today())
-        place = st.text_input("Mjesto", value=place_city)
+        date_from = c1.date_input("Datum od", value=date.today())
+        date_to = c2.date_input("Datum do", value=date.today())
+        place = st.text_input("Mjesto")
 
         countries = all_countries_list()
         c_country, c_iso = st.columns([3,1])
         with c_country:
-            idx_country = ([""]+countries).index(country_e) if country_e in countries else 0
-            country = st.selectbox("Država (odaberi)", [""] + countries, index=idx_country)
+            country = st.selectbox("Država (odaberi)", [""] + countries, index=0)
         with c_iso:
             auto_iso = iso3(country) if country else ""
-            st.text_input("ISO3 kratica", value=auto_iso or (iso_e or ""), disabled=True, key=f"iso3_display_edit_{cid}")
+            st.text_input("ISO3 kratica", value=auto_iso, disabled=True)
 
-        style = st.selectbox("Hrvački stil", STYLES, index=STYLES.index(style_e) if style_e in STYLES else 0)
-        age_group = st.selectbox("Uzrast", AGES, index=AGES.index(age_e) if age_e in AGES else 0)
+        style = st.selectbox("Hrvački stil", STYLES)
+        age_group = st.selectbox("Uzrast", AGES)
 
         c3, c4, c5 = st.columns(3)
-        team_rank = c3.text_input("Ekipni poredak (npr. 1., 5., 10.)", value=team_rank_e or "")
-        club_competitors = c4.number_input("Broj naših natjecatelja", min_value=0, step=1, value=int(club_comp_e or 0))
-        total_competitors = c5.number_input("Ukupan broj natjecatelja", min_value=0, step=1, value=int(total_comp_e or 0))
+        team_rank = c3.text_input("Ekipni poredak (npr. 1., 5., 10.)")
+        club_competitors = c4.number_input("Broj naših natjecatelja", min_value=0, step=1, value=0)
+        total_competitors = c5.number_input("Ukupan broj natjecatelja", min_value=0, step=1, value=0)
         c6, c7 = st.columns(2)
-        total_clubs = c6.number_input("Broj klubova", min_value=0, step=1, value=int(clubs_e or 0))
-        total_countries = c7.number_input("Broj zemalja", min_value=0, step=1, value=int(countries_e or 0))
+        total_clubs = c6.number_input("Broj klubova", min_value=0, step=1, value=0)
+        total_countries = c7.number_input("Broj zemalja", min_value=0, step=1, value=0)
 
+        # Treneri: iz baze + dodatni (auto-upis u bazu)
         coach_rows = conn.execute("SELECT full_name FROM coaches ORDER BY full_name").fetchall()
         coach_choices = [r[0] for r in coach_rows] if coach_rows else []
-        preselected = [c for c in (coaches_e or "").split(", ") if c in coach_choices]
         c_coach_sel, c_coach_custom = st.columns([2,1])
         with c_coach_sel:
-            coach_mult = st.multiselect("Trener(i) (iz baze)", coach_choices, default=preselected)
+            coach_mult = st.multiselect("Trener(i) (iz baze)", coach_choices)
         with c_coach_custom:
-            coach_custom = st.text_input("Dodatni trener (ime i prezime)", value="")
+            coach_custom = st.text_input("Dodatni trener (ime i prezime)")
         coach_all = coach_mult + ([coach_custom] if coach_custom else [])
-        coach_text = ", ".join([c for c in coach_all if c]) if coach_all else (coaches_e or "")
-
-        notes = st.text_area("Zapažanje trenera (za objave)", value=notes_e or "")
-        bulletin_link = st.text_input("Link na bilten/rezultate", value=bull_e or "")
-        results_link = st.text_input("Link na službene rezultate", value=res_e or "")
-        gallery_link = st.text_input("Link na objavu na webu (galerija)", value=gal_e or "")
-
-        submit_edit = st.form_submit_button("Spremi izmjene")
-
-    if submit_edit:
-        conn.execute("""UPDATE competitions SET
-                            kind=?, custom_kind=?, name=?, date_from=?, date_to=?, place=?, style=?, age_group=?,
-                            country=?, country_code=?, team_rank=?, club_competitors=?, total_competitors=?,
-                            total_clubs=?, total_countries=?, coaches_text=?, notes=?, bulletin_link=?, results_link=?, gallery_link=?
-                        WHERE id=?""",
-                     (kind, rep_sub if kind=="REPREZENTATIVNI NASTUP" else custom_kind, name,
-                      str(date_from), str(date_to), f"{place}, {country}", style, age_group,
-                      country, auto_iso, team_rank, int(club_competitors), int(total_competitors),
-                      int(total_clubs), int(total_countries), coach_text, notes, bulletin_link, results_link, gallery_link,
-                      edit_id))
-        conn.commit()
-        st.success("Izmjene spremljene.")
-
-        st.markdown("---")
-        cdel, cdup = st.columns(2)
-        with cdel:
-            confirm_del = st.checkbox("Potvrdi brisanje", key=f"confirm_del_{edit_id}")
-            if st.button("Obriši natjecanje", key=f"btn_delete_{edit_id}"):
-                if confirm_del:
-                    conn.execute("DELETE FROM competition_results WHERE competition_id=?", (edit_id,))
-                    conn.execute("DELETE FROM competition_photos  WHERE competition_id=?", (edit_id,))
-                    conn.execute("DELETE FROM competitions WHERE id=?", (edit_id,))
+        coach_all = [c for c in coach_all if c]
+        # auto upis novih trenera
+        for cname in coach_all:
+            if cname not in coach_choices:
+                try:
+                    conn.execute("INSERT INTO coaches (full_name) VALUES (?)", (cname,))
                     conn.commit()
-                    st.success("Natjecanje obrisano.")
-                else:
-                    st.warning("Označi 'Potvrdi brisanje' prije brisanja.")
-        with cdup:
-            if st.button("Dupliciraj u novi zapis", key=f"btn_duplicate_{edit_id}"):
-                conn.execute("""
-                    INSERT INTO competitions
-                    (kind, custom_kind, name, date_from, date_to, place, style, age_group, country, country_code,
-                     team_rank, club_competitors, total_competitors, total_clubs, total_countries,
-                     coaches_text, notes, bulletin_link, results_link, gallery_link, bulletin_file, results_file)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                """, (
-                    kind, rep_sub if kind=="REPREZENTATIVNI NASTUP" else custom_kind, (name or "") + " (kopija)",
-                    str(date_from), str(date_to), f"{place}, {country}", style, age_group, country, auto_iso,
-                    team_rank, int(club_competitors), int(total_competitors), int(total_clubs), int(total_countries),
-                    coach_text, notes, bulletin_link, results_link, gallery_link, "", ""
-                ))
-                conn.commit()
-                new_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-                st.success(f"Kreirana kopija natjecanja (ID: {new_id}).")
+                except sqlite3.IntegrityError:
+                    pass
+        coach_text = ", ".join(coach_all)
 
-st.markdown("---")
+        notes = st.text_area("Zapažanje trenera (za objave)")
+        bulletin_link = st.text_input("Link na bilten/rezultate")
+        results_link = st.text_input("Link na službene rezultate")
+        gallery_link = st.text_input("Link na objavu na webu (galerija)")
 
-# ----- Pregled i pretraga natjecanja -----
-st.subheader("Pregled i pretraga natjecanja")
-colf = st.columns(6)
-f_kind    = colf[0].selectbox("Vrsta natjecanja", [""] + KINDS, index=0)
-with colf[1]:
-    f_rep_sub = st.selectbox("Podvrsta (REP)", [""] + REP_SUB, index=0, disabled=(f_kind != "REPREZENTATIVNI NASTUP"))
-f_year    = colf[2].text_input("Godina (npr. 2025)")
-f_age     = colf[3].text_input("Uzrast (dio naziva)")
-f_style   = colf[4].text_input("Stil (GR/FS/WW/BW/MOD)")
-f_country = colf[5].text_input("Država (dio naziva)")
+        submit = st.form_submit_button("Spremi natjecanje")
 
-if st.button("Pretraži"):
-    q = """
-        SELECT id, name AS ime, kind AS vrsta, age_group AS uzrast, style AS stil,
-               date_from AS od, date_to AS do, place AS mjesto, country AS država, country_code AS ISO3,
-               club_competitors AS nastupili, coaches_text AS trener,
-               team_rank AS ekipno, total_competitors AS natjecatelja,
-               total_clubs AS klubova, total_countries AS zemalja
-        FROM competitions WHERE 1=1
-    """
-    params = []
-    if f_kind.strip():    q += " AND kind = ?";               params.append(f_kind)
-    if f_year.strip():    q += " AND date_from LIKE ?";       params.append(f"{f_year}%")
-    if f_age.strip():     q += " AND age_group LIKE ?";       params.append(f"%{f_age}%")
-    if f_style.strip():   q += " AND style LIKE ?";           params.append(f"%{f_style}%")
-    if f_country.strip(): q += " AND country LIKE ?";         params.append(f"%{f_country}%")
-    if f_kind.strip() == "REPREZENTATIVNI NASTUP" and f_rep_sub.strip():
-        q += " AND custom_kind = ?";                          params.append(f_rep_sub)
-    q += " ORDER BY date_from DESC"
-    cdf = pd.read_sql_query(q, conn, params=params)
-else:
-    cdf = pd.read_sql_query("""
-        SELECT id, name AS ime, kind AS vrsta, age_group AS uzrast, style AS stil,
-               date_from AS od, date_to AS do, place AS mjesto, country AS država, country_code AS ISO3,
-               club_competitors AS nastupili, coaches_text AS trener
-        FROM competitions ORDER BY date_from DESC
-    """, conn)
+    if submit:
+        conn.execute("""INSERT INTO competitions
+            (kind,custom_kind,name,date_from,date_to,place,style,age_group,country,country_code,
+             team_rank,club_competitors,total_competitors,total_clubs,total_countries,
+             coaches_text,notes,bulletin_link,results_link,gallery_link, bulletin_file, results_file)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (kind, rep_sub if kind=="REPREZENTATIVNI NASTUP" else custom_kind, name,
+             str(date_from), str(date_to), f"{place}, {country}", style, age_group, country, auto_iso,
+             team_rank, int(club_competitors), int(total_competitors), int(total_clubs), int(total_countries),
+             coach_text, notes, bulletin_link, results_link, gallery_link, "", ""))
+        conn.commit()
+        st.success("Natjecanje spremljeno.")
 
-# formatiranje prikaza
-if 'od' in cdf.columns:
-    try:
-        cdf['od'] = pd.to_datetime(cdf['od']).dt.strftime('%d.%m.%Y.')
-    except Exception:
-        pass
-if 'do' in cdf.columns:
-    try:
-        cdf['do'] = pd.to_datetime(cdf['do']).dt.strftime('%d.%m.%Y.')
-    except Exception:
-        pass
-cdf.insert(0, 'R.br.', range(1, len(cdf)+1))
-st.dataframe(cdf, use_container_width=True)
+    st.markdown("---")
+    st.subheader("Uredi / briši / dupliciraj natjecanje")
+    comp_rows = conn.execute("SELECT id, name, date_from, kind FROM competitions ORDER BY date_from DESC LIMIT 200").fetchall()
+    comp_options = [""] + [f"{r[0]} – {r[2]} – {r[1]} ({r[3]})" for r in comp_rows]
+    choice = st.selectbox("Odaberi natjecanje", comp_options, key="edit_select_comp")
 
-st.header("Unos natjecanja")
+    if choice:
+        edit_id = int(choice.split(" – ")[0])
+        row = conn.execute("""SELECT id, kind, custom_kind, name, date_from, date_to, place, style, age_group,
+                                     country, country_code, team_rank, club_competitors, total_competitors,
+                                     total_clubs, total_countries, coaches_text, notes, bulletin_link, results_link, gallery_link
+                              FROM competitions WHERE id=?""", (edit_id,)).fetchone()
+        (cid, kind_e, custom_kind_e, name_e, df_e, dt_e, place_e, style_e, age_e,
+         country_e, iso_e, team_rank_e, club_comp_e, total_comp_e, clubs_e, countries_e,
+         coaches_e, notes_e, bull_e, res_e, gal_e) = row
+        place_city = (place_e or "").split(",")[0].strip()
 
-with st.form("comp_form"):
-    kind = st.selectbox("Vrsta natjecanja", KINDS)
-    rep_sub = st.selectbox("Podvrsta reprezentativnog nastupa", REP_SUB, disabled=(kind!="REPREZENTATIVNI NASTUP"))
-    custom_kind = st.text_input("Upiši vrstu (ako 'OSTALO')", disabled=(kind!="OSTALO"))
-    name = st.text_input("Ime natjecanja")
+        with st.form("edit_comp_form"):
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                kind = st.selectbox("Vrsta natjecanja", KINDS, index=KINDS.index(kind_e) if kind_e in KINDS else 0, key="kind_edit")
+            with col2:
+                rep_sub = st.selectbox("Podvrsta (REP)", REP_SUB, disabled=(kind!="REPREZENTATIVNI NASTUP"), key="rep_edit")
+            with col3:
+                custom_kind = st.text_input("Upiši vrstu (ako 'OSTALO')", value=custom_kind_e or "", disabled=(kind!="OSTALO"))
+
+            name = st.text_input("Ime natjecanja (ako postoji naziv)", value=name_e or "")
+            c1, c2 = st.columns(2)
+            date_from = c1.date_input("Datum od", value=pd.to_datetime(df_e).date() if df_e else date.today())
+            date_to = c2.date_input("Datum do (ako 1 dan, ostavi isti)", value=pd.to_datetime(dt_e).date() if dt_e else date.today())
+            place = st.text_input("Mjesto", value=place_city)
+
+            countries = all_countries_list()
+            c_country, c_iso = st.columns([3,1])
+            with c_country:
+                idx_country = ([""]+countries).index(country_e) if country_e in countries else 0
+                country = st.selectbox("Država (odaberi)", [""] + countries, index=idx_country)
+            with c_iso:
+                auto_iso = iso3(country) if country else ""
+                st.text_input("ISO3 kratica", value=auto_iso or (iso_e or ""), disabled=True, key=f"iso3_display_edit_{cid}")
+
+            style = st.selectbox("Hrvački stil", STYLES, index=STYLES.index(style_e) if style_e in STYLES else 0)
+            age_group = st.selectbox("Uzrast", AGES, index=AGES.index(age_e) if age_e in AGES else 0)
+
+            c3, c4, c5 = st.columns(3)
+            team_rank = c3.text_input("Ekipni poredak (npr. 1., 5., 10.)", value=team_rank_e or "")
+            club_competitors = c4.number_input("Broj naših natjecatelja", min_value=0, step=1, value=int(club_comp_e or 0))
+            total_competitors = c5.number_input("Ukupan broj natjecatelja", min_value=0, step=1, value=int(total_comp_e or 0))
+            c6, c7 = st.columns(2)
+            total_clubs = c6.number_input("Broj klubova", min_value=0, step=1, value=int(clubs_e or 0))
+            total_countries = c7.number_input("Broj zemalja", min_value=0, step=1, value=int(countries_e or 0))
+
+            coach_rows = conn.execute("SELECT full_name FROM coaches ORDER BY full_name").fetchall()
+            coach_choices = [r[0] for r in coach_rows] if coach_rows else []
+            preselected = [c for c in (coaches_e or "").split(", ") if c in coach_choices]
+            c_coach_sel, c_coach_custom = st.columns([2,1])
+            with c_coach_sel:
+                coach_mult = st.multiselect("Trener(i) (iz baze)", coach_choices, default=preselected)
+            with c_coach_custom:
+                coach_custom = st.text_input("Dodatni trener (ime i prezime)", value="")
+            coach_all = coach_mult + ([coach_custom] if coach_custom else [])
+            coach_all = [c for c in coach_all if c]
+            for cname in coach_all:
+                if cname not in coach_choices:
+                    try:
+                        conn.execute("INSERT INTO coaches (full_name) VALUES (?)", (cname,))
+                        conn.commit()
+                    except sqlite3.IntegrityError:
+                        pass
+            coach_text = ", ".join(coach_all) if coach_all else (coaches_e or "")
+
+            notes = st.text_area("Zapažanje trenera (za objave)", value=notes_e or "")
+            bulletin_link = st.text_input("Link na bilten/rezultate", value=bull_e or "")
+            results_link = st.text_input("Link na službene rezultate", value=res_e or "")
+            gallery_link = st.text_input("Link na objavu na webu (galerija)", value=gal_e or "")
+
+            submit_edit = st.form_submit_button("Spremi izmjene")
+
+        if submit_edit:
+            conn.execute("""UPDATE competitions SET
+                                kind=?, custom_kind=?, name=?, date_from=?, date_to=?, place=?, style=?, age_group=?,
+                                country=?, country_code=?, team_rank=?, club_competitors=?, total_competitors=?,
+                                total_clubs=?, total_countries=?, coaches_text=?, notes=?, bulletin_link=?, results_link=?, gallery_link=?
+                            WHERE id=?""",
+                         (kind, rep_sub if kind=="REPREZENTATIVNI NASTUP" else custom_kind, name,
+                          str(date_from), str(date_to), f"{place}, {country}", style, age_group,
+                          country, auto_iso, team_rank, int(club_competitors), int(total_competitors),
+                          int(total_clubs), int(total_countries), coach_text, notes, bulletin_link, results_link, gallery_link,
+                          edit_id))
+            conn.commit()
+            st.success("Izmjene spremljene.")
+
+            st.markdown("---")
+            cdel, cdup = st.columns(2)
+            with cdel:
+                confirm_del = st.checkbox("Potvrdi brisanje", key=f"confirm_del_{edit_id}")
+                if st.button("Obriši natjecanje", key=f"btn_delete_{edit_id}"):
+                    if confirm_del:
+                        conn.execute("DELETE FROM competition_results WHERE competition_id=?", (edit_id,))
+                        conn.execute("DELETE FROM competition_photos  WHERE competition_id=?", (edit_id,))
+                        conn.execute("DELETE FROM competitions WHERE id=?", (edit_id,))
+                        conn.commit()
+                        st.success("Natjecanje obrisano.")
+                    else:
+                        st.warning("Označi 'Potvrdi brisanje' prije brisanja.")
+            with cdup:
+                if st.button("Dupliciraj u novi zapis", key=f"btn_duplicate_{edit_id}"):
+                    conn.execute("""
+                        INSERT INTO competitions
+                        (kind, custom_kind, name, date_from, date_to, place, style, age_group, country, country_code,
+                         team_rank, club_competitors, total_competitors, total_clubs, total_countries,
+                         coaches_text, notes, bulletin_link, results_link, gallery_link, bulletin_file, results_file)
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    """, (
+                        kind, rep_sub if kind=="REPREZENTATIVNI NASTUP" else custom_kind, (name or "") + " (kopija)",
+                        str(date_from), str(date_to), f"{place}, {country}", style, age_group, country, auto_iso,
+                        team_rank, int(club_competitors), int(total_competitors), int(total_clubs), int(total_countries),
+                        coach_text, notes, bulletin_link, results_link, gallery_link, "", ""
+                    ))
+                    conn.commit()
+                    new_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+                    st.success(f"Kreirana kopija natjecanja (ID: {new_id}).")
+
+    st.markdown("---")
+    st.subheader("Unos rezultata sportaša")
+    # Pick competition and member to add a result row
+    comps = pd.read_sql_query("SELECT id, name || ' ' || COALESCE(date_from,'') AS naziv FROM competitions ORDER BY date_from DESC", conn)
+    mems  = pd.read_sql_query("SELECT id, full_name AS ime FROM members ORDER BY full_name", conn)
+    if comps.empty or mems.empty:
+        st.info("Za unos rezultata potrebno je imati barem jedno natjecanje i jednog člana.")
+    else:
+        cc1, cc2, cc3, cc4 = st.columns(4)
+        with cc1:
+            comp_name = st.selectbox("Natjecanje", comps["naziv"].tolist())
+            comp_id = int(comps.loc[comps["naziv"]==comp_name, "id"].values[0])
+        with cc2:
+            member_name = st.selectbox("Sportaš", mems["ime"].tolist())
+            member_id = int(mems.loc[mems["ime"]==member_name, "id"].values[0])
+        with cc3:
+            weight_category = st.text_input("Težinska kategorija (npr. 65kg)")
+        with cc4:
+            style_r = st.selectbox("Stil", STYLES, index=0, key="style_res")
+
+        colp = st.columns(2)
+        placing = colp[0].text_input("Plasman (npr. 1., 3., 5.)")
+        result_text = colp[1].text_input("Rezime (npr. 2-1, IP/DQ itd.)")
+
+        if st.button("Dodaj rezultat"):
+            conn.execute("""INSERT INTO competition_results 
+                            (competition_id, member_id, weight_category, style, placing, result_text)
+                            VALUES (?,?,?,?,?,?)""",
+                         (comp_id, member_id, weight_category, style_r, placing, result_text))
+            conn.commit()
+            st.success("Rezultat dodan.")
+
+    st.markdown("---")
+    st.subheader("Pregled i pretraga natjecanja")
+    colf = st.columns(6)
+    f_kind    = colf[0].selectbox("Vrsta natjecanja", [""] + KINDS, index=0)
+    with colf[1]:
+        f_rep_sub = st.selectbox("Podvrsta (REP)", [""] + REP_SUB, index=0, disabled=(f_kind != "REPREZENTATIVNI NASTUP"))
+    f_year    = colf[2].text_input("Godina (npr. 2025)")
+    f_age     = colf[3].text_input("Uzrast (dio naziva)")
+    f_style   = colf[4].text_input("Stil (GR/FS/WW/BW/MOD)")
+    f_country = colf[5].text_input("Država (dio naziva)")
+
+    if st.button("Pretraži"):
+        q = """
+            SELECT id, name AS ime, kind AS vrsta, age_group AS uzrast, style AS stil,
+                   date_from AS od, date_to AS do, place AS mjesto, country AS država, country_code AS ISO3,
+                   club_competitors AS nastupili, coaches_text AS trener,
+                   team_rank AS ekipno, total_competitors AS natjecatelja,
+                   total_clubs AS klubova, total_countries AS zemalja
+            FROM competitions WHERE 1=1
+        """
+        params = []
+        if f_kind.strip():    q += " AND kind = ?";               params.append(f_kind)
+        if f_year.strip():    q += " AND date_from LIKE ?";       params.append(f"{f_year}%")
+        if f_age.strip():     q += " AND age_group LIKE ?";       params.append(f"%{f_age}%")
+        if f_style.strip():   q += " AND style LIKE ?";           params.append(f"%{f_style}%")
+        if f_country.strip(): q += " AND country LIKE ?";         params.append(f"%{f_country}%")
+        if f_kind.strip() == "REPREZENTATIVNI NASTUP" and f_rep_sub.strip():
+            q += " AND custom_kind = ?";                          params.append(f_rep_sub)
+        q += " ORDER BY date_from DESC"
+        cdf = pd.read_sql_query(q, conn, params=params)
+    else:
+        cdf = pd.read_sql_query("""
+            SELECT id, name AS ime, kind AS vrsta, age_group AS uzrast, style AS stil,
+                   date_from AS od, date_to AS do, place AS mjesto, country AS država, country_code AS ISO3,
+                   club_competitors AS nastupili, coaches_text AS trener
+            FROM competitions ORDER BY date_from DESC
+        """, conn)
+
+    if not cdf.empty:
+        cdf["od"] = cdf["od"].apply(fmt_date)
+        cdf["do"] = cdf["do"].apply(fmt_date)
+        cdf.insert(0, 'R.br.', range(1, len(cdf)+1))
+    st.dataframe(cdf, use_container_width=True)
+
+    st.markdown("### Export")
     c1, c2 = st.columns(2)
-    date_from = c1.date_input("Datum od", value=date.today())
-    date_to = c2.date_input("Datum do", value=date.today())
-    place = st.text_input("Mjesto")
-    countries = all_countries_list()
-    c_country, c_iso = st.columns([3,1])
-    with c_country:
-        country = st.selectbox("Država (odaberi)", [""] + countries, index=0)
-    with c_iso:
-        auto_iso = iso3(country) if country else ""
-        st.text_input("ISO3 kratica", value=auto_iso, disabled=True)
+    with c1:
+        csv = cdf.to_csv(index=False).encode("utf-8")
+        st.download_button("Preuzmi natjecanja (CSV)", data=csv, file_name="natjecanja.csv", mime="text/csv")
+    with c2:
+        # Excel export
+        from io import BytesIO
+        excel_buffer = BytesIO()
+        with pd.ExcelWriter(excel_buffer, engine="xlsxwriter") as writer:
+            cdf.to_excel(writer, index=False, sheet_name="Natjecanja")
+        st.download_button("Preuzmi natjecanja (Excel)", data=excel_buffer.getvalue(),
+                           file_name="natjecanja.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-    style = st.selectbox("Hrvački stil", STYLES)
-    age_group = st.selectbox("Uzrast", AGES)
-
-    c3, c4, c5 = st.columns(3)
-    team_rank = c3.text_input("Ekipni poredak (npr. 1., 5., 10.)")
-    club_competitors = c4.number_input("Broj naših natjecatelja", min_value=0, step=1, value=0)
-    total_competitors = c5.number_input("Ukupan broj natjecatelja", min_value=0, step=1, value=0)
-    c6, c7 = st.columns(2)
-    total_clubs = c6.number_input("Broj klubova", min_value=0, step=1, value=0)
-    total_countries = c7.number_input("Broj zemalja", min_value=0, step=1, value=0)
-
-    # Treneri: iz baze + dodatni
-    coach_rows = conn.execute("SELECT full_name FROM coaches ORDER BY full_name").fetchall()
-    coach_choices = [r[0] for r in coach_rows] if coach_rows else []
-    c_coach_sel, c_coach_custom = st.columns([2,1])
-    with c_coach_sel:
-        coach_mult = st.multiselect("Trener(i) (iz baze)", coach_choices)
-    with c_coach_custom:
-        coach_custom = st.text_input("Dodatni trener (ime i prezime)")
-    coach_all = coach_mult + ([coach_custom] if coach_custom else [])
-    coach_text = ", ".join(coach_all)
-
-    notes = st.text_area("Zapažanje trenera (za objave)")
-    bulletin_link = st.text_input("Link na bilten/rezultate")
-    results_link = st.text_input("Link na službene rezultate")
-    gallery_link = st.text_input("Link na objavu na webu (galerija)")
-
-    submit = st.form_submit_button("Spremi natjecanje")
-
-if submit:
-    conn.execute("""INSERT INTO competitions
-        (kind,custom_kind,name,date_from,date_to,place,style,age_group,country,country_code,
-         team_rank,club_competitors,total_competitors,total_clubs,total_countries,
-         coaches_text,notes,bulletin_link,results_link,gallery_link, bulletin_file, results_file)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (kind, rep_sub if kind=="REPREZENTATIVNI NASTUP" else custom_kind, name,
-         str(date_from), str(date_to), f"{place}, {country}", style, age_group, country, auto_iso,
-         team_rank, int(club_competitors), int(total_competitors), int(total_clubs), int(total_countries),
-         coach_text, notes, bulletin_link, results_link, gallery_link, "", ""))
-    conn.commit()
-    st.success("Natjecanje spremljeno.")
-
-st.markdown("---")
-
-# --------------- Uređivanje / brisanje / dupliranje ---------------
-st.header("Uredi / briši / dupliciraj")
-
-comp_rows = conn.execute("SELECT id, name, date_from, kind FROM competitions ORDER BY date_from DESC LIMIT 200").fetchall()
-comp_options = [""] + [f"{r[0]} – {r[2]} – {r[1]} ({r[3]})" for r in comp_rows]
-choice = st.selectbox("Odaberi natjecanje", comp_options)
-
-if choice:
-    edit_id = int(choice.split(" – ")[0])
-    row = conn.execute("""SELECT id, kind, custom_kind, name, date_from, date_to, place, style, age_group,
-                                 country, country_code, team_rank, club_competitors, total_competitors,
-                                 total_clubs, total_countries, coaches_text, notes, bulletin_link, results_link, gallery_link
-                          FROM competitions WHERE id=?""", (edit_id,)).fetchone()
-    (cid, kind_e, custom_kind_e, name_e, df_e, dt_e, place_e, style_e, age_e,
-     country_e, iso_e, team_rank_e, club_comp_e, total_comp_e, clubs_e, countries_e,
-     coaches_e, notes_e, bull_e, res_e, gal_e) = row
-    place_city = (place_e or "").split(",")[0].strip()
-
-    with st.form("edit_comp_form"):
-        kind = st.selectbox("Vrsta natjecanja", KINDS, index=KINDS.index(kind_e) if kind_e in KINDS else 0)
-        rep_sub = st.selectbox("Podvrsta reprezentativnog nastupa", REP_SUB, disabled=(kind!="REPREZENTATIVNI NASTUP"))
-        custom_kind = st.text_input("Upiši vrstu (ako 'OSTALO')", value=custom_kind_e or "", disabled=(kind!="OSTALO"))
-        name = st.text_input("Ime natjecanja (ako postoji naziv)", value=name_e or "")
-        c1, c2 = st.columns(2)
-        date_from = c1.date_input("Datum od", value=pd.to_datetime(df_e).date() if df_e else date.today())
-        date_to = c2.date_input("Datum do (ako 1 dan, ostavi isti)", value=pd.to_datetime(dt_e).date() if dt_e else date.today())
-        place = st.text_input("Mjesto", value=place_city)
-
-        countries = all_countries_list()
-        c_country, c_iso = st.columns([3,1])
-        with c_country:
-            country = st.selectbox("Država (odaberi)", [""] + countries, index=([""]+countries).index(country_e) if country_e in countries else 0)
-        with c_iso:
-            auto_iso = iso3(country) if country else ""
-            st.text_input("ISO3 kratica", value=auto_iso or (iso_e or ""), disabled=True, key=f"iso3_display_edit_{cid}")
-
-        style = st.selectbox("Hrvački stil", STYLES, index=STYLES.index(style_e) if style_e in STYLES else 0)
-        age_group = st.selectbox("Uzrast", AGES, index=AGES.index(age_e) if age_e in AGES else 0)
-
-        c3, c4, c5 = st.columns(3)
-        team_rank = c3.text_input("Ekipni poredak (npr. 1., 5., 10.)", value=team_rank_e or "")
-        club_competitors = c4.number_input("Broj naših natjecatelja", min_value=0, step=1, value=int(club_comp_e or 0))
-        total_competitors = c5.number_input("Ukupan broj natjecatelja", min_value=0, step=1, value=int(total_comp_e or 0))
-        c6, c7 = st.columns(2)
-        total_clubs = c6.number_input("Broj klubova", min_value=0, step=1, value=int(clubs_e or 0))
-        total_countries = c7.number_input("Broj zemalja", min_value=0, step=1, value=int(countries_e or 0))
-
-        coach_rows = conn.execute("SELECT full_name FROM coaches ORDER BY full_name").fetchall()
-        coach_choices = [r[0] for r in coach_rows] if coach_rows else []
-        preselected = [c for c in (coaches_e or "").split(", ") if c in coach_choices]
-        c_coach_sel, c_coach_custom = st.columns([2,1])
-        with c_coach_sel:
-            coach_mult = st.multiselect("Trener(i) (iz baze)", coach_choices, default=preselected)
-        with c_coach_custom:
-            coach_custom = st.text_input("Dodatni trener (ime i prezime)", value="")
-        coach_all = coach_mult + ([coach_custom] if coach_custom else [])
-        coach_text = ", ".join(coach_all) if coach_all else (coaches_e or "")
-
-        notes = st.text_area("Zapažanje trenera (za objave)", value=notes_e or "")
-        bulletin_link = st.text_input("Link na bilten/rezultate", value=bull_e or "")
-        results_link = st.text_input("Link na službene rezultate", value=res_e or "")
-        gallery_link = st.text_input("Link na objavu na webu (galerija)", value=gal_e or "")
-
-        submit_edit = st.form_submit_button("Spremi izmjene")
-
-    if submit_edit:
-        conn.execute("""UPDATE competitions SET
-                            kind=?, custom_kind=?, name=?, date_from=?, date_to=?, place=?, style=?, age_group=?,
-                            country=?, country_code=?, team_rank=?, club_competitors=?, total_competitors=?,
-                            total_clubs=?, total_countries=?, coaches_text=?, notes=?, bulletin_link=?, results_link=?, gallery_link=?
-                        WHERE id=?""",
-                     (kind, rep_sub if kind=="REPREZENTATIVNI NASTUP" else custom_kind, name,
-                      str(date_from), str(date_to), f"{place}, {country}", style, age_group,
-                      country, auto_iso, team_rank, int(club_competitors), int(total_competitors),
-                      int(total_clubs), int(total_countries), coach_text, notes, bulletin_link, results_link, gallery_link,
-                      edit_id))
-        conn.commit()
-        st.success("Izmjene spremljene.")
-
-        st.markdown("---")
-        cdel, cdup = st.columns(2)
-        with cdel:
-            confirm_del = st.checkbox("Potvrdi brisanje", key=f"confirm_del_{edit_id}")
-            if st.button("Obriši natjecanje", key=f"btn_delete_{edit_id}"):
-                if confirm_del:
-                    conn.execute("DELETE FROM competition_results WHERE competition_id=?", (edit_id,))
-                    conn.execute("DELETE FROM competition_photos  WHERE competition_id=?", (edit_id,))
-                    conn.execute("DELETE FROM competitions WHERE id=?", (edit_id,))
-                    conn.commit()
-                    st.success("Natjecanje obrisano.")
-                else:
-                    st.warning("Označi 'Potvrdi brisanje' prije brisanja.")
-        with cdup:
-            if st.button("Dupliciraj u novi zapis", key=f"btn_duplicate_{edit_id}"):
-                conn.execute("""INSERT INTO competitions
-                    (kind, custom_kind, name, date_from, date_to, place, style, age_group, country, country_code,
-                     team_rank, club_competitors, total_competitors, total_clubs, total_countries,
-                     coaches_text, notes, bulletin_link, results_link, gallery_link, bulletin_file, results_file)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                """, (
-                    kind, rep_sub if kind=="REPREZENTATIVNI NASTUP" else custom_kind, (name or "") + " (kopija)",
-                    str(date_from), str(date_to), f"{place}, {country}", style, age_group, country, auto_iso,
-                    team_rank, int(club_competitors), int(total_competitors), int(total_clubs), int(total_countries),
-                    coach_text, notes, bulletin_link, results_link, gallery_link, "", ""
-                ))
-                conn.commit()
-                new_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-                st.success(f"Kreirana kopija natjecanja (ID: {new_id}).")
-
-st.markdown("---")
-
-# --------------- Pregled i pretraga ---------------
-st.header("Pregled i pretraga natjecanja")
-
-colf = st.columns(6)
-f_kind    = colf[0].selectbox("Vrsta natjecanja", [""] + KINDS, index=0)
-with colf[1]:
-    f_rep_sub = st.selectbox("Podvrsta (REP)", [""] + REP_SUB, index=0, disabled=(f_kind != "REPREZENTATIVNI NASTUP"))
-f_year    = colf[2].text_input("Godina (npr. 2025)")
-f_age     = colf[3].text_input("Uzrast (dio naziva)")
-f_style   = colf[4].text_input("Stil (GR/FS/WW/BW/MOD)")
-f_country = colf[5].text_input("Država (dio naziva)")
-
-if st.button("Pretraži"):
-    q = """
-        SELECT id, name AS ime, kind AS vrsta, age_group AS uzrast, style AS stil,
-               date_from AS od, date_to AS do, place AS mjesto, country AS država, country_code AS ISO3,
-               club_competitors AS nastupili, coaches_text AS trener,
-               team_rank AS ekipno, total_competitors AS natjecatelja,
-               total_clubs AS klubova, total_countries AS zemalja
-        FROM competitions WHERE 1=1
-    """
-    params = []
-    if f_kind.strip():    q += " AND kind = ?";               params.append(f_kind)
-    if f_year.strip():    q += " AND date_from LIKE ?";       params.append(f"{f_year}%")
-    if f_age.strip():     q += " AND age_group LIKE ?";       params.append(f"%{f_age}%")
-    if f_style.strip():   q += " AND style LIKE ?";           params.append(f"%{f_style}%")
-    if f_country.strip(): q += " AND country LIKE ?";         params.append(f"%{f_country}%")
-    if f_kind.strip() == "REPREZENTATIVNI NASTUP" and f_rep_sub.strip():
-        q += " AND custom_kind = ?";                          params.append(f_rep_sub)
-    q += " ORDER BY date_from DESC"
-    cdf = pd.read_sql_query(q, conn, params=params)
-else:
-    cdf = pd.read_sql_query("""
-        SELECT id, name AS ime, kind AS vrsta, age_group AS uzrast, style AS stil,
-               date_from AS od, date_to AS do, place AS mjesto, country AS država, country_code AS ISO3,
-               club_competitors AS nastupili, coaches_text AS trener
-        FROM competitions ORDER BY date_from DESC
-    """, conn)
-
-# formatiranje
-if 'od' in cdf.columns:
-    try:
-        cdf['od'] = pd.to_datetime(cdf['od']).dt.strftime('%d.%m.%Y.')
-    except Exception:
-        pass
-if 'do' in cdf.columns:
-    try:
-        cdf['do'] = pd.to_datetime(cdf['do']).dt.strftime('%d.%m.%Y.')
-    except Exception:
-        pass
-cdf.insert(0, 'R.br.', range(1, len(cdf)+1))
-st.dataframe(cdf, use_container_width=True)
+# ---------------- Izvješća ----------------
+elif menu == "Izvješća":
+    st.header("Izvješća")
+    st.write("Ovdje možemo dodati automatska izvješća (mjesečni pregled, statistike, itd.).")
+    # Primjer: broj članova, broj veterana, broj natjecanja
+    stats = {
+        "Članova": conn.execute("SELECT COUNT(*) FROM members").fetchone()[0],
+        "Veterana": conn.execute("SELECT COUNT(*) FROM members WHERE is_veteran=1").fetchone()[0],
+        "Natjecanja": conn.execute("SELECT COUNT(*) FROM competitions").fetchone()[0],
+    }
+    sdf = pd.DataFrame(list(stats.items()), columns=["Metrija", "Vrijednost"])
+    st.dataframe(sdf, use_container_width=True)
