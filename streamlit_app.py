@@ -1002,19 +1002,18 @@ def section_competitions():
         date_to = c2.date_input("Datum do (ako 1 dan, ostavi isti)", value=date.today())
         place = st.text_input("Mjesto")
 
-        # --- DRŽAVA: izbor iz popisa + auto ISO3 ---
+        # --- DRŽAVA: izbor iz popisa + auto ISO3 (u stupcima) ---
         countries = all_countries_list()
-        if countries:
+        c_country, c_iso = st.columns([3, 1])
+        with c_country:
             country = st.selectbox("Država (odaberi)", [""] + countries, index=0)
+        with c_iso:
             auto_iso = iso3(country) if country else ""
-            st.text_input("ISO3 kratica (auto)", value=auto_iso, disabled=True)
-        else:
-            country = st.text_input("Država (puni naziv)")
-            auto_iso = iso3(country)
-            st.text_input("ISO3 kratica (auto)", value=auto_iso, disabled=True)
+            st.text_input("ISO3 kratica", value=auto_iso, disabled=True, key="iso3_display")
 
         style = st.selectbox("Hrvački stil", STYLES)
         age_group = st.selectbox("Uzrast", AGES)
+
         c3, c4, c5 = st.columns(3)
         team_rank = c3.text_input("Ekipni poredak (npr. 1., 5., 10.)")
         club_competitors = c4.number_input("Broj naših natjecatelja", min_value=0, step=1)
@@ -1024,10 +1023,16 @@ def section_competitions():
         total_countries = c7.number_input("Broj zemalja", min_value=0, step=1)
 
         # Treneri koji su vodili
+        # Treneri koji su vodili
         coach_rows = conn.execute("SELECT full_name FROM coaches ORDER BY full_name").fetchall()
         coach_choices = [r[0] for r in coach_rows] if coach_rows else []
-        coach_mult = st.multiselect("Trener(i) (iz baze)", coach_choices)
-        coach_text = ", ".join(coach_mult)
+        with c_coach_sel:
+            coach_mult = st.multiselect("Trener(i) (iz baze)", coach_choices)
+        with c_coach_custom:
+            coach_custom = st.text_input("Dodatni trener (ime i prezime)")
+        coach_all = coach_mult + ([coach_custom] if coach_custom else [])
+        coach_text = ", ".join(coach_all)
+
 
         # Opis i linkovi + upload
         notes = st.text_area("Zapažanje trenera (za objave)")
