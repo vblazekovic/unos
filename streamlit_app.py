@@ -471,6 +471,7 @@ with cols_logo[0]:
 with cols_logo[1]:
     logo_align = st.selectbox("Poravnanje", ["Centar","Lijevo","Desno"], index=0)
 
+
 def render_logo(path, width, align):
     if align == "Centar":
         c1, c2, c3 = st.columns([1,1,1])
@@ -484,6 +485,7 @@ def render_logo(path, width, align):
         c1, c2 = st.columns([2,1])
         with c2:
             st.image(path, use_container_width=False, width=width)
+
 
 if stored_logo:
     try:
