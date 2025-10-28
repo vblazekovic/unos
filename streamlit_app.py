@@ -426,6 +426,18 @@ def iso3(country_name: str) -> str:
     except Exception:
         return ""
 
+def all_countries_list():
+    """
+    Vrati popis službenih naziva država (pycountry), sortirano abecedno.
+    Ako pycountry nije dostupan, vrati prazan popis.
+    """
+    try:
+        import pycountry
+        return sorted([c.name for c in pycountry.countries])
+    except Exception:
+        return []
+
+
 
 def mailto_link(address: str, subject: str = "", body: str = "") -> str:
     if not address:
@@ -978,17 +990,7 @@ def section_competitions():
     STYLES = ["GR","FS","WW","BW","MODIFICIRANO"]
     AGES = ["POČETNICI","U11","U13","U15","U17","U20","U23","SENIORI"]
 
-    
-
-    # ---- helper za popis država ----
-    def all_countries_list():
-        try:
-            if pycountry:
-                return sorted([c.name for c in pycountry.countries])
-        except Exception:
-            pass
-        return []
-conn = get_conn()
+    conn = get_conn()
 
     with st.form("comp_form"):
         kind = st.selectbox("Vrsta natjecanja", KINDS)
@@ -1000,7 +1002,7 @@ conn = get_conn()
         date_to = c2.date_input("Datum do (ako 1 dan, ostavi isti)", value=date.today())
         place = st.text_input("Mjesto")
 
-        # --- DRŽAVA: popis svih država + auto ISO3 ---
+        # --- DRŽAVA: izbor iz popisa + auto ISO3 ---
         countries = all_countries_list()
         if countries:
             country = st.selectbox("Država (odaberi)", [""] + countries, index=0)
@@ -1010,6 +1012,7 @@ conn = get_conn()
             country = st.text_input("Država (puni naziv)")
             auto_iso = iso3(country)
             st.text_input("ISO3 kratica (auto)", value=auto_iso, disabled=True)
+
         style = st.selectbox("Hrvački stil", STYLES)
         age_group = st.selectbox("Uzrast", AGES)
         c3, c4, c5 = st.columns(3)
@@ -1025,7 +1028,6 @@ conn = get_conn()
         coach_choices = [r[0] for r in coach_rows] if coach_rows else []
         coach_mult = st.multiselect("Trener(i) (iz baze)", coach_choices)
         coach_text = ", ".join(coach_mult)
-
 
         # Opis i linkovi + upload
         notes = st.text_area("Zapažanje trenera (za objave)")

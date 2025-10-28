@@ -1,6 +1,4 @@
-streamlit>=1.38
-pandas>=2.2
-openpyxl>=3.1
-xlsxwriter>=3.2
-pycountry>=24.6
-matplotlib>=3.8
+streamlit
+pandas
+matplotlib
+pycountry==24.6.1
