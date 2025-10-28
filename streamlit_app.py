@@ -485,9 +485,9 @@ def section_club():
         secretary = st.text_input("Tajnik kluba", df.loc[0, "secretary"] if "secretary" in df.columns else "")
 
         st.markdown("**Članovi predsjedništva**")
-        board_df = st.experimental_data_editor(pd.DataFrame(columns=["ime_prezime","telefon","email"]), num_rows=1)
+        board_df = st.data_editor(pd.DataFrame(columns=["ime_prezime","telefon","email"]), num_rows="dynamic", use_container_width=True, hide_index=True)
         st.markdown("**Nadzorni odbor**")
-        superv_df = st.experimental_data_editor(pd.DataFrame(columns=["ime_prezime","telefon","email"]), num_rows=1)
+        superv_df = st.data_editor(pd.DataFrame(columns=["ime_prezime","telefon","email"]), num_rows="dynamic", use_container_width=True, hide_index=True)
 
         st.subheader("Dokumenti kluba")
         d1, d2, d3 = st.columns(3)
