@@ -78,7 +78,9 @@ def init_db():
         )
     """)
 
-    # Članovi tijela (predsjedništvo & nadzorni)
+        ensure_column("club_info","logo_path","TEXT")
+
+# Članovi tijela (predsjedništvo & nadzorni)
     cur.execute("""
         CREATE TABLE IF NOT EXISTS board_members (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -453,15 +455,60 @@ def section_club():
 
     page_header("Osnovni podaci o klubu",
                 "Unesite i spremite podatke kluba, vodstva i dokumente.")
-    st.caption("Logo i boje: crvena • bijela • zlatna")
-
     with st.container():
         c1, c2 = st.columns(2)
         with c1:
-            st.image("https://hk-podravka.com/wp-content/uploads/2021/08/cropped-HK-Podravka-logo.png",
-                     caption=KLUB_NAZIV, use_container_width=True)
-            logo_upload = st.file_uploader("Učitaj vlastiti logo (opcionalno)", type=["png","jpg","jpeg"])
-            logo_path = save_upload(logo_upload, "logo") if logo_upload else ""
+            stored_logo = (df.loc[0, "logo_path"] if "logo_path" in df.columns else "")
+logo_upload = st.file_uploader("Učitaj vlastiti logo (opcionalno)", type=["png","jpg","jpeg"])
+new_logo_path = ""
+if logo_upload:
+    new_logo_path = save_upload(logo_upload, "logo")
+    stored_logo = new_logo_path or stored_logo
+
+# Kontrole prikaza loga
+cols_logo = st.columns([1,1])
+with cols_logo[0]:
+    logo_size = st.slider("Veličina loga (px)", min_value=90, max_value=220, value=140, step=10)
+with cols_logo[1]:
+    logo_align = st.selectbox("Poravnanje", ["Centar","Lijevo","Desno"], index=0)
+
+def render_logo(path, width, align):
+    if align == "Centar":
+        c1, c2, c3 = st.columns([1,1,1])
+        with c2:
+            st.image(path, use_container_width=False, width=width)
+    elif align == "Lijevo":
+        c1, c2 = st.columns([1,2])
+        with c1:
+            st.image(path, use_container_width=False, width=width)
+    else:
+        c1, c2 = st.columns([2,1])
+        with c2:
+            st.image(path, use_container_width=False, width=width)
+
+if stored_logo:
+    try:
+        render_logo(stored_logo, logo_size, logo_align)
+    except Exception:
+        st.info("Logo je spremljen, ali ga nije moguće prikazati.")
+else:
+    st.info("Nije postavljen logo. Učitaj sliku kako bi se prikazala u zaglavlju.")
+
+# Gumb za uklanjanje loga
+rem_cols = st.columns([1,3])
+if rem_cols[0].button("Ukloni logo", type="secondary"):
+    try:
+        import os
+        if stored_logo and os.path.exists(stored_logo):
+            os.remove(stored_logo)
+    except Exception:
+        pass
+    conn2 = get_conn()
+    conn2.execute("UPDATE club_info SET logo_path=NULL WHERE id=1")
+    conn2.commit()
+    conn2.close()
+    st.success("Logo uklonjen. Osvježi stranicu ako se još prikazuje cache.")
+
 
         with c2:
             st.markdown("**Društvene mreže**")
@@ -500,10 +547,10 @@ def section_club():
     if submitted:
         now = datetime.now().isoformat()
         conn.execute("""UPDATE club_info SET
-                        name=?, street=?, city_zip=?, email=?, address=?, oib=?, web=?, iban=?,
+                        name=?, street=?, city_zip=?, email=?, address=?, oib=?, web=?, iban=?, logo_path=?,
                         president=?, secretary=?, instagram=?, facebook=?, tiktok=?, updated_at=?
                         WHERE id=1""",
-                     (name, street, city_zip, email, f"{street}, {city_zip}", oib, web, iban,
+                     (name, street, city_zip, email, f"{street}, {city_zip}", oib, web, iban, stored_logo, 
                       president, secretary, instagram, facebook, tiktok, now))
         # Pohrana članova tijela (jednostavno: najprije obriši pa ubaci unesene)
         conn.execute("DELETE FROM board_members WHERE kind='board'")
