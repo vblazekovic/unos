@@ -1159,8 +1159,9 @@ def section_competitions():
         q = """
             SELECT id, name AS ime, kind AS vrsta, age_group AS uzrast, style AS stil,
                    date_from AS od, date_to AS do, place AS mjesto, country AS država, country_code AS ISO3,
-                   team_rank AS ekipno, club_competitors AS naši, total_competitors AS natjecatelja,
-                   total_clubs AS klubova, total_countries AS zemalja
+                   club_competitors AS nastupili, coaches_text AS trener,
+                   team_rank AS ekipno, club_competitors AS nastupili, total_competitors AS natjecatelja,
+                   total_clubs AS klubova, total_countries AS zemalja, coaches_text AS trener
             FROM competitions WHERE 1=1
         """
         params: List[str] = []
@@ -1174,7 +1175,8 @@ def section_competitions():
     else:
         cdf = pd.read_sql_query("""
             SELECT id, name AS ime, kind AS vrsta, age_group AS uzrast, style AS stil,
-                   date_from AS od, date_to AS do, place AS mjesto, country AS država, country_code AS ISO3
+                   date_from AS od, date_to AS do, place AS mjesto, country AS država, country_code AS ISO3,
+                   club_competitors AS nastupili, coaches_text AS trener
             FROM competitions ORDER BY date_from DESC
         """, conn)
 
