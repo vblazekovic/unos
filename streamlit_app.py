@@ -459,7 +459,7 @@ def section_club():
         c1, c2 = st.columns(2)
         with c1:
             st.image("https://hk-podravka.com/wp-content/uploads/2021/08/cropped-HK-Podravka-logo.png",
-                     caption=KLUB_NAZIV, use_column_width=True)
+                     caption=KLUB_NAZIV, use_container_width=True)
             logo_upload = st.file_uploader("Učitaj vlastiti logo (opcionalno)", type=["png","jpg","jpeg"])
             logo_path = save_upload(logo_upload, "logo") if logo_upload else ""
 
