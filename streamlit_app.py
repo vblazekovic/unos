@@ -1023,9 +1023,9 @@ def section_competitions():
         total_countries = c7.number_input("Broj zemalja", min_value=0, step=1)
 
         # Treneri koji su vodili
-        # Treneri koji su vodili
         coach_rows = conn.execute("SELECT full_name FROM coaches ORDER BY full_name").fetchall()
         coach_choices = [r[0] for r in coach_rows] if coach_rows else []
+        c_coach_sel, c_coach_custom = st.columns([2, 1])
         with c_coach_sel:
             coach_mult = st.multiselect("Trener(i) (iz baze)", coach_choices)
         with c_coach_custom:
