@@ -677,7 +677,7 @@ def section_members():
              passport_number,passport_issuer,passport_valid_until,
              active_competitor,veteran,other_flag,membership_fee_eur,
              group_id,photo_path,consent_path,application_path,medical_path,medical_valid_until)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (full_name, first_name, last_name, str(dob) if dob else "", gender, oib,
              street, city, postal_code, f"{street}, {city} {postal_code}",
              athlete_email, parent_email, athlete_phone, parent_phone, parent_name,
