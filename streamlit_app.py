@@ -1,4 +1,3 @@
-
 # -*- coding: utf-8 -*-
 """
 HK Podravka – klupska web-admin aplikacija (Streamlit, 1-file .py)
@@ -1117,11 +1116,7 @@ def section_competitions():
     st.download_button("Skini sve rezultate (Excel)",
                        data=excel_bytes_from_df(res_all, "Rezultati"),
                        file_name="rezultati.xlsx")
-    "Skini sve rezultate (Excel)",
-                       data=excel_bytes_from_df(res_all, "Rezultati"),
-                       file_name="rezultati.xlsx")
-
-    # Pretraga i pregled natjecanja
+# Pretraga i pregled natjecanja
     st.markdown("---")
     st.subheader("Pregled i pretraga natjecanja")
     colf = st.columns(5)
