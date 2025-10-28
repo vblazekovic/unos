@@ -77,8 +77,7 @@ def init_db():
             created_at TEXT, updated_at TEXT
         )
     """)
-
-        ensure_column("club_info","logo_path","TEXT")
+    ensure_column("club_info","logo_path","TEXT")
 
 # Članovi tijela (predsjedništvo & nadzorni)
     cur.execute("""
