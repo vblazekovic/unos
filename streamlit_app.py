@@ -30,7 +30,11 @@ except Exception:
     pycountry = None
 
 # Za grafove u statistici
-import matplotlib.pyplot as plt
+try:
+    import matplotlib.pyplot as plt
+    HAS_MPL = True
+except Exception:
+    HAS_MPL = False
 
 # ==========================
 # KONSTANTE KLUBA I STIL
@@ -1113,7 +1117,11 @@ def section_competitions():
     st.download_button("Skini sve rezultate (Excel)",
                        data=excel_bytes_from_df(res_all, "Rezultati"),
                        file_name="rezultati.xlsx")
-# Pretraga i pregled natjecanja
+    "Skini sve rezultate (Excel)",
+                       data=excel_bytes_from_df(res_all, "Rezultati"),
+                       file_name="rezultati.xlsx")
+
+    # Pretraga i pregled natjecanja
     st.markdown("---")
     st.subheader("Pregled i pretraga natjecanja")
     colf = st.columns(5)
@@ -1202,25 +1210,34 @@ def section_stats():
         if not sdf.empty:
             # Medalje
             medals = sdf[["zlato","srebro","bronca"]].sum()
-            fig = plt.figure()
-            plt.bar(["Zlato","Srebro","Bronca"], medals.values)
-            plt.title("Medalje (ukupno)")
-            st.pyplot(fig)
+            if HAS_MPL:
+                fig = plt.figure()
+                plt.bar(["Zlato","Srebro","Bronca"], medals.values)
+                plt.title("Medalje (ukupno)")
+                st.pyplot(fig)
+            else:
+                st.bar_chart(medals)
 
             # Omjer pobjeda/poraza
             wl = sdf[["pobjede","porazi"]].sum()
-            fig2 = plt.figure()
-            plt.bar(["Pobjede","Porazi"], wl.values)
-            plt.title("Pobjede / Porazi (ukupno)")
-            st.pyplot(fig2)
+            if HAS_MPL:
+                fig2 = plt.figure()
+                plt.bar(["Pobjede","Porazi"], wl.values)
+                plt.title("Pobjede / Porazi (ukupno)")
+                st.pyplot(fig2)
+            else:
+                st.bar_chart(wl)
 
             # Ukupno borbi po vrsti natjecanja (top 10)
             top = sdf.groupby("kind")["ukupno_borbi"].sum().sort_values(ascending=False).head(10)
-            fig3 = plt.figure()
-            plt.bar(list(top.index), list(top.values))
-            plt.title("Ukupno borbi po vrsti (top 10)")
-            plt.xticks(rotation=45, ha="right")
-            st.pyplot(fig3)
+            if HAS_MPL:
+                fig3 = plt.figure()
+                plt.bar(list(top.index), list(top.values))
+                plt.title("Ukupno borbi po vrsti (top 10)")
+                plt.xticks(rotation=45, ha="right")
+                st.pyplot(fig3)
+            else:
+                st.bar_chart(top)
     conn.close()
 
 
